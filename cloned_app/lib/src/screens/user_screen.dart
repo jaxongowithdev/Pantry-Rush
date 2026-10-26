@@ -1,93 +1,331 @@
+import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
-import '../database/storage_manager.dart';
-import '../models/user_preferences.dart';
-import '../utils/visual_theme.dart';
-import '../widgets/stoa_chrome.dart';
-import 'dashboard_view.dart';
 
-class UserScreen extends StatefulWidget {
+import '../data/game_data_manager.dart';
+import '../game/memory_game.dart';
+import '../widgets/coin_popup.dart';
+import '../widgets/cooking_area.dart';
+import 'collection_screen.dart';
+import 'orders_screen.dart';
+import 'splash_screen.dart';
+import 'theme_selection_screen.dart';
+import 'upgrade_screen.dart';
+
+enum AppScreen { home, kitchen, orders, collection, upgrade, profile }
+
+class UserScreen extends StatelessWidget {
   const UserScreen({super.key});
 
   @override
-  State<UserScreen> createState() => _UserScreenState();
-}
-
-class _UserScreenState extends State<UserScreen> {
-  final _storage = StorageManager.instance;
-  bool _ready = false;
-  UserPreferences? _prefs;
-
-  @override
-  void initState() {
-    super.initState();
-    _boot();
-  }
-
-  Future<void> _boot() async {
-    try {
-      await _storage.database;
-      final prefs = await _storage.getPreferences();
-      setState(() {
-        _prefs = prefs;
-        _ready = true;
-      });
-    } catch (e, st) {
-      debugPrint('Pewter Stoa boot: $e\n$st');
-      setState(() {
-        _prefs = UserPreferences();
-        _ready = true;
-      });
-    }
-  }
-
-  Future<void> reload() async {
-    final prefs = await _storage.getPreferences();
-    setState(() => _prefs = prefs);
-  }
-
-  @override
   Widget build(BuildContext context) {
-    var mode = ThemeMode.light;
-    switch (_prefs?.theme) {
-      case 'dark':
-        mode = ThemeMode.dark;
-        break;
-      case 'system':
-        mode = ThemeMode.system;
-        break;
-    }
-
     return MaterialApp(
-      title: 'Pewter Stoa',
+      title: 'Pantry Rush',
       debugShowCheckedModeBanner: false,
-      theme: VisualTheme.lightTheme,
-      darkTheme: VisualTheme.darkTheme,
-      themeMode: mode,
-      home: !_ready || _prefs == null
-          ? const _Boot()
-          : _prefs!.showOnboarding
-              ? WelcomeView(onFinished: reload)
-              : DashboardView(onPrefsChanged: reload),
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFFFF6347)),
+        useMaterial3: true,
+      ),
+      home: const _AppHome(),
     );
   }
 }
 
-class _Boot extends StatelessWidget {
-  const _Boot();
+class _AppHome extends StatefulWidget {
+  const _AppHome();
+
+  @override
+  State<_AppHome> createState() => _AppHomeState();
+}
+
+class _AppHomeState extends State<_AppHome> {
+  AppScreen _currentScreen = AppScreen.home;
+  int _totalCoins = 0;
+  int _chefLevel = 1;
+  int _ordersCompleted = 0;
+  bool _showSplash = true;
+  bool _dataLoaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadGameData();
+  }
+
+  Future<void> _loadGameData() async {
+    final coins = await gameDataManager.getCoins();
+    final orders = await gameDataManager.getOrdersCompleted();
+    final level = await gameDataManager.getChefLevel();
+
+    setState(() {
+      _totalCoins = coins;
+      _ordersCompleted = orders;
+      _chefLevel = level;
+      _dataLoaded = true;
+    });
+  }
+
+  Future<void> _saveCoins(int coins) async {
+    await gameDataManager.saveCoins(coins);
+    setState(() => _totalCoins = coins);
+  }
+
+  Future<void> _addOrder() async {
+    await gameDataManager.incrementOrders();
+    final newCount = await gameDataManager.getOrdersCompleted();
+    setState(() => _ordersCompleted = newCount);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_showSplash) {
+      return SplashScreen(
+        onComplete: () {
+          setState(() => _showSplash = false);
+        },
+      );
+    }
+
+    if (!_dataLoaded) {
+      return const Scaffold(
+        backgroundColor: Color(0xFF2C1810),
+        body: Center(
+          child: CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation(Color(0xFFFF6347)),
+          ),
+        ),
+      );
+    }
+
+    switch (_currentScreen) {
+      case AppScreen.home:
+        return HomeScreen(
+          onPlayKitchen: () => setState(() => _currentScreen = AppScreen.kitchen),
+          onViewOrders: () => setState(() => _currentScreen = AppScreen.orders),
+          onViewCollection: () => setState(() => _currentScreen = AppScreen.collection),
+          onViewUpgrades: () => setState(() => _currentScreen = AppScreen.upgrade),
+          onViewProfile: () => setState(() => _currentScreen = AppScreen.profile),
+        );
+      case AppScreen.kitchen:
+        return KitchenScreen(
+          onBack: () => setState(() => _currentScreen = AppScreen.home),
+          onCoinsEarned: (coins) => _saveCoins(coins),
+          onOrderCompleted: () => _addOrder(),
+        );
+      case AppScreen.orders:
+        return OrdersScreen(
+          onBack: () => setState(() => _currentScreen = AppScreen.home),
+        );
+      case AppScreen.collection:
+        return CollectionScreen(
+          onBack: () => setState(() => _currentScreen = AppScreen.home),
+        );
+      case AppScreen.upgrade:
+        return UpgradeScreen(
+          onBack: () => setState(() => _currentScreen = AppScreen.home),
+          currentCoins: _totalCoins,
+          onCoinsChanged: (newCoins) => _saveCoins(newCoins),
+        );
+      case AppScreen.profile:
+        return _ProfileScreen(
+          level: _chefLevel,
+          coins: _totalCoins,
+          ordersCompleted: _ordersCompleted,
+          onBack: () => setState(() => _currentScreen = AppScreen.home),
+        );
+    }
+  }
+}
+
+class KitchenScreen extends StatefulWidget {
+  final VoidCallback onBack;
+  final void Function(int) onCoinsEarned;
+  final VoidCallback onOrderCompleted;
+
+  const KitchenScreen({
+    super.key,
+    required this.onBack,
+    required this.onCoinsEarned,
+    required this.onOrderCompleted,
+  });
+
+  @override
+  State<KitchenScreen> createState() => _KitchenScreenState();
+}
+
+class _KitchenScreenState extends State<KitchenScreen> {
+  late CookingGame _game;
+  String _notification = 'Tap cards to cook!';
+  int _currentCoins = 0;
+  int _ordersCount = 0;
+  bool _showCoinPopup = false;
+  int _coinBonus = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _startNewGame();
+  }
+
+  void _startNewGame() {
+    _game = CookingGame(
+      onCoinsEarned: (coins) {
+        // Calculate the bonus = new total - current total
+        final bonus = coins - _currentCoins;
+        setState(() {
+          _currentCoins = coins;
+          _coinBonus = bonus;
+          _showCoinPopup = bonus > 0;
+        });
+        widget.onCoinsEarned(coins);
+      },
+      onOrderCompleted: () {
+        setState(() => _ordersCount++);
+        widget.onOrderCompleted();
+      },
+      onNotification: (msg) {
+        setState(() => _notification = msg);
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: VisualTheme.ink,
-      body: Center(
+      backgroundColor: const Color(0xFF2C1810),
+      body: SafeArea(
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const ColumnWalk(t: 0.7, color: VisualTheme.fuchsia),
-            const SizedBox(height: 22),
-            Text('PEWTER STOA', style: VisualTheme.micro(11, color: VisualTheme.fuchsia)),
-            const SizedBox(height: 8),
-            Text('Raising the first column…', style: VisualTheme.body(15, color: VisualTheme.mist)),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  IconButton(
+                    onPressed: widget.onBack,
+                    icon: const Icon(Icons.arrow_back, color: Colors.white, size: 28),
+                  ),
+                  const Expanded(
+                    child: Text(
+                      '🍳 Kitchen',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFD700).withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: const Color(0xFFFFD700), width: 2),
+                    ),
+                    child: Row(
+                      children: [
+                        const Text('💰', style: TextStyle(fontSize: 20)),
+                        const SizedBox(width: 6),
+                        AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 300),
+                          transitionBuilder: (child, animation) {
+                            return ScaleTransition(
+                              scale: animation,
+                              child: child,
+                            );
+                          },
+                          child: Text(
+                            '$_currentCoins',
+                            key: ValueKey<int>(_currentCoins),
+                            style: const TextStyle(
+                              color: Color(0xFFFFD700),
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    onPressed: _startNewGame,
+                    icon: const Icon(Icons.refresh, color: Colors.white, size: 28),
+                  ),
+                ],
+              ),
+            ),
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 16),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFF8B4513),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Expanded(
+                    child: Text(
+                      _notification,
+                      style: const TextStyle(color: Colors.white, fontSize: 16),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                  if (_ordersCount > 0) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF4CAF50),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        children: [
+                          const Text('✅', style: TextStyle(fontSize: 14)),
+                          const SizedBox(width: 4),
+                          Text(
+                            '$_ordersCount',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            StreamBuilder<int>(
+              stream: Stream.periodic(const Duration(milliseconds: 100), (count) => count),
+              builder: (context, _) {
+                return CookingArea(
+                  cookProgress: _game.cookProgress,
+                  patience: _game.patience,
+                  heatLevel: _game.heat,
+                  state: _game.state,
+                  currentDish: _game.currentDish,
+                );
+              },
+            ),
+            Expanded(
+              child: Stack(
+                children: [
+                  GameWidget(game: _game),
+                  if (_showCoinPopup)
+                    Positioned.fill(
+                      child: CoinPopup(
+                        coins: _coinBonus,
+                        onComplete: () {
+                          setState(() => _showCoinPopup = false);
+                        },
+                      ),
+                    ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -95,138 +333,184 @@ class _Boot extends StatelessWidget {
   }
 }
 
-class WelcomeView extends StatefulWidget {
-  final VoidCallback onFinished;
-  const WelcomeView({super.key, required this.onFinished});
+class _SimpleScreen extends StatelessWidget {
+  final String title;
+  final String icon;
+  final String content;
+  final VoidCallback onBack;
 
-  @override
-  State<WelcomeView> createState() => _WelcomeViewState();
-}
-
-class _WelcomeViewState extends State<WelcomeView> {
-  int _page = 0;
-  String _aspect = 'ease';
-  int _minutes = 19;
-  String _grain = 'even';
-
-  Future<void> _finish() async {
-    final storage = StorageManager.instance;
-    final current = await storage.getPreferences();
-    await storage.savePreferences(
-      current.copyWith(aspect: _aspect, minutes: _minutes, grain: _grain, showOnboarding: false),
-    );
-    widget.onFinished();
-  }
+  const _SimpleScreen({
+    required this.title,
+    required this.icon,
+    required this.content,
+    required this.onBack,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final ink = VisualTheme.inkOf(context);
-    final muted = VisualTheme.mutedOf(context);
     return Scaffold(
-      body: MistWash(
-        child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(22, 24, 22, 20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('PEWTER STOA', style: VisualTheme.micro(11, color: VisualTheme.fuchsia)),
-                const Spacer(),
-                if (_page == 0) ...[
-                  Text('A walk\nyou can keep.', style: VisualTheme.display(36, color: ink)),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Personalized sessions, breathing, sleep, and a private journal — fully offline. No account. No cloud.',
-                    style: VisualTheme.body(16, color: muted),
+      backgroundColor: const Color(0xFF2C1810),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  IconButton(
+                    onPressed: onBack,
+                    icon: const Icon(Icons.arrow_back, color: Colors.white, size: 28),
                   ),
-                ] else if (_page == 1) ...[
-                  Text('What should the walk hold?', style: VisualTheme.display(30, color: ink)),
-                  const SizedBox(height: 16),
-                  ...[
-                    ('ease', 'Ease', 'Unhook the day from the shoulders.'),
-                    ('sleep', 'Sleep', 'A walk you can set down in the shade.'),
-                    ('stretch', 'Stretch', 'Hips, spine, a plinth unknot.'),
-                    ('sit', 'Sit', 'Count, park a worry, hear the columns.'),
-                  ].map((g) => _Bay(label: g.$2, detail: g.$3, selected: _aspect == g.$1, onTap: () => setState(() => _aspect = g.$1))),
-                ] else if (_page == 2) ...[
-                  Text('How many minutes?', style: VisualTheme.display(30, color: ink)),
-                  const SizedBox(height: 16),
-                  ...VisualTheme.minuteChoices.map(
-                    (m) => _Bay(
-                      label: '$m minutes',
-                      detail: m == 13 ? 'Four columns, a short sit.' : m == 19 ? 'A full range or a body scan.' : 'Room for dusk shade.',
-                      selected: _minutes == m,
-                      onTap: () => setState(() => _minutes = m),
+                  Expanded(
+                    child: Text(
+                      '$icon $title',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
-                ] else ...[
-                  Text('How does the grain feel?', style: VisualTheme.display(30, color: ink)),
-                  const SizedBox(height: 16),
-                  ...[
-                    ('smooth', 'Smooth', 'Keep strong shapes off the walk.'),
-                    ('even', 'Even', 'Most days, a middle range.'),
-                    ('rough', 'Rough', 'Hills yesterday are welcome.'),
-                  ].map((g) => _Bay(label: g.$2, detail: g.$3, selected: _grain == g.$1, onTap: () => setState(() => _grain = g.$1))),
                 ],
-                const Spacer(),
-                Row(
-                  children: [
-                    Text('${_page + 1}  ·  4', style: VisualTheme.micro(10, color: muted)),
-                    const Spacer(),
-                    FilledButton(
-                      onPressed: () {
-                        if (_page < 3) {
-                          setState(() => _page += 1);
-                        } else {
-                          _finish();
-                        }
-                      },
-                      child: Text(_page < 3 ? 'Next' : 'Enter the stoa'),
-                    ),
-                  ],
-                ),
-              ],
+              ),
             ),
-          ),
+            Expanded(
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(32),
+                  child: Text(
+                    content,
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 18,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
-class _Bay extends StatelessWidget {
-  final String label;
-  final String detail;
-  final bool selected;
-  final VoidCallback onTap;
-  const _Bay({required this.label, required this.detail, required this.selected, required this.onTap});
+class _ProfileScreen extends StatelessWidget {
+  final int level;
+  final int coins;
+  final int ordersCompleted;
+  final VoidCallback onBack;
+
+  const _ProfileScreen({
+    required this.level,
+    required this.coins,
+    required this.ordersCompleted,
+    required this.onBack,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: InkWell(
-        onTap: onTap,
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          color: VisualTheme.bayOf(context),
-          child: Row(
-            children: [
-              Container(width: 6, height: 36, color: selected ? VisualTheme.fuchsia : Colors.transparent),
-              const SizedBox(width: 12),
-              Expanded(
+    return Scaffold(
+      backgroundColor: const Color(0xFF2C1810),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  IconButton(
+                    onPressed: onBack,
+                    icon: const Icon(Icons.arrow_back, color: Colors.white, size: 28),
+                  ),
+                  const Expanded(
+                    child: Text(
+                      '👤 Profile',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Text(label, style: VisualTheme.heading(17, color: VisualTheme.inkOf(context))),
-                    Text(detail, style: VisualTheme.body(13, color: VisualTheme.mutedOf(context))),
+                    const Text(
+                      '👨‍🍳',
+                      style: TextStyle(fontSize: 80),
+                    ),
+                    const SizedBox(height: 24),
+                    Text(
+                      'Chef Level $level',
+                      style: const TextStyle(
+                        color: Color(0xFFFFD700),
+                        fontSize: 32,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 32),
+                    _StatCard(label: 'Total Coins', value: coins.toString(), icon: '💰'),
+                    const SizedBox(height: 16),
+                    _StatCard(label: 'Orders Completed', value: ordersCompleted.toString(), icon: '✅'),
                   ],
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
+      ),
+    );
+  }
+}
+
+class _StatCard extends StatelessWidget {
+  final String label;
+  final String value;
+  final String icon;
+
+  const _StatCard({required this.label, required this.value, required this.icon});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF8B4513),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        children: [
+          Text(icon, style: const TextStyle(fontSize: 40)),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(color: Colors.white70, fontSize: 14),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  value,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 28,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

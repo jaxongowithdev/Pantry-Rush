@@ -1,6 +1,6 @@
-name: user_screen
-description: "Pewter Stoa - An on-device yoga and meditation teacher. Personalized sessions, breathing, sleep, and a private journal — fully offline. No account. No cloud."
-version: 1.9.0+1
+name: tiny_chef
+description: "Pantry Rush - Fast-paced cooking and time management game"
+version: 1.0.0+1
 
 environment:
   sdk: '>=3.4.0 <4.0.0'
@@ -9,9 +9,10 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  sqflite: ^2.3.0
-  path: ^1.8.3
-  plugin_platform_interface: ^2.1.8
+  flame: ^1.21.0
+  flame_svg: ^1.10.0
+  flutter_svg: ^2.0.10
+  shared_preferences: ^2.3.3
 
 dev_dependencies:
   flutter_test:
@@ -20,3 +21,5 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/cards/
