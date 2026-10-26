@@ -1,0 +1,23 @@
+name: tiny_chef_example
+description: "Pantry Rush - Fast-paced cooking game"
+publish_to: 'none'
+version: 1.0.0+1
+environment:
+  sdk: ^3.8.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  tiny_chef:
+    path: ../
+
+dev_dependencies:
+  integration_test:
+    sdk: flutter
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
